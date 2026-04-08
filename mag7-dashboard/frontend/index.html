@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magnificent 7 — Dashboard de Monitoramento</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg-primary: #0f1117; --bg-secondary: #1a1d29; --bg-card: #1e2130;
+            --bg-card-hover: #252840; --border: #2a2d3e;
+            --text-primary: #e8eaed; --text-secondary: #9aa0b0; --text-muted: #6b7280;
+            --accent-blue: #3b82f6; --accent-purple: #8b5cf6; --accent-cyan: #06b6d4;
+            --green: #22c55e; --yellow: #eab308; --red: #ef4444; --orange: #f97316;
+            --font-mono: 'SF Mono','Fira Code','Cascadia Code',monospace;
+            --font-sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+        }
+        body { font-family: var(--font-sans); background: var(--bg-primary); color: var(--text-primary); line-height: 1.6; }
+        .app { max-width: 1440px; margin: 0 auto; padding: 24px; }
+
+        /* Header */
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 12px; }
+        .header h1 { font-size: 28px; font-weight: 700; background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header-sub { color: var(--text-secondary); font-size: 14px; margin-top: 2px; }
+        .header-right { display: flex; gap: 12px; align-items: center; }
+        .badge { padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; display: inline-flex; align-items: center; gap: 5px; }
+        .badge-live { background: rgba(34,197,94,.15); color: var(--green); }
+        .badge-demo { background: rgba(139,92,246,.15); color: var(--accent-purple); }
+
+        .btn { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-size: 13px; cursor: pointer; transition: .2s; }
+        .btn:hover { background: var(--bg-card-hover); border-color: var(--accent-blue); }
+        .btn-active { background: var(--accent-blue); border-color: var(--accent-blue); }
+        .btn-sm { padding: 4px 12px; font-size: 12px; }
+
+        /* Demo Banner */
+        .demo-banner { background: rgba(139,92,246,.1); border: 1px solid rgba(139,92,246,.3); border-radius: 12px; padding: 12px 20px; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        .demo-banner b { color: var(--accent-purple); font-size: 14px; }
+        .demo-banner span { font-size: 12px; color: var(--text-secondary); }
+
+        /* Alerts */
+        .alerts { background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.2); border-radius: 12px; padding: 16px 20px; margin-bottom: 24px; }
+        .alerts.warning { background: rgba(234,179,8,.08); border-color: rgba(234,179,8,.2); }
+        .alerts-title { font-weight: 600; font-size: 14px; margin-bottom: 8px; }
+        .alert-item { font-size: 13px; color: var(--text-secondary); padding: 3px 0; display: flex; align-items: center; gap: 8px; }
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .dot-green { background: var(--green); } .dot-yellow { background: var(--yellow); } .dot-red { background: var(--red); } .dot-gray { background: var(--text-muted); }
+
+        /* Summary */
+        .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 28px; }
+        .summary-item { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px; }
+        .summary-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+        .summary-val { font-size: 24px; font-weight: 700; margin-top: 4px; font-family: var(--font-mono); }
+        .summary-detail { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 4px; margin-bottom: 24px; background: var(--bg-secondary); border-radius: 10px; padding: 4px; width: fit-content; }
+        .tab { padding: 8px 20px; border-radius: 8px; border: none; background: transparent; color: var(--text-secondary); font-size: 14px; cursor: pointer; transition: .2s; }
+        .tab.active { background: var(--bg-card); color: var(--text-primary); font-weight: 500; }
+        .tab:hover:not(.active) { color: var(--text-primary); }
+        .tab-content { display: none; } .tab-content.active { display: block; }
+
+        /* Cards */
+        .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 20px; }
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; transition: .3s; cursor: pointer; }
+        .card:hover { border-color: var(--accent-blue); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(59,130,246,.1); }
+        .card-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+        .card-ticker { font-size: 22px; font-weight: 700; font-family: var(--font-mono); }
+        .card-name { font-size: 13px; color: var(--text-secondary); }
+        .card-price { font-size: 22px; font-weight: 700; font-family: var(--font-mono); text-align: right; }
+        .card-mcap { font-size: 12px; color: var(--text-muted); text-align: right; }
+
+        .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .metric { background: var(--bg-secondary); border-radius: 10px; padding: 12px; border-left: 3px solid var(--border); }
+        .metric.green { border-left-color: var(--green); } .metric.yellow { border-left-color: var(--yellow); }
+        .metric.red { border-left-color: var(--red); } .metric.gray { border-left-color: var(--text-muted); }
+        .metric-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .3px; }
+        .metric-val { font-size: 18px; font-weight: 600; font-family: var(--font-mono); margin-top: 2px; }
+
+        /* Table */
+        .table-wrap { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; overflow: visible; }
+        .table-title { padding: 20px 24px 12px; font-size: 18px; font-weight: 600; }
+        .tbl { width: 100%; border-collapse: collapse; }
+        .tbl thead { background: var(--bg-secondary); }
+        .tbl th { padding: 12px 14px; text-align: left; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 500; cursor: pointer; user-select: none; white-space: nowrap; }
+        .tbl th:hover { color: var(--text-primary); }
+        .tbl td { padding: 13px 14px; border-top: 1px solid var(--border); font-size: 13px; font-family: var(--font-mono); }
+        .tbl tr:hover td { background: var(--bg-card-hover); }
+        .tbl .tk { font-weight: 700; font-size: 14px; }
+
+        /* Charts */
+        .chart-section { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 8px; }
+        .chart-title { font-size: 18px; font-weight: 600; }
+        .chart-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+        .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .chart-canvas-wrap { position: relative; width: 100%; height: 320px; }
+        .chart-canvas-wrap canvas { width: 100% !important; height: 100% !important; }
+
+        /* Modal */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,.7); z-index: 1000; display: none; justify-content: center; align-items: center; backdrop-filter: blur(4px); }
+        .modal-overlay.open { display: flex; }
+        .modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 20px; width: 90%; max-width: 800px; max-height: 85vh; overflow-y: auto; padding: 32px; }
+        .modal-close { float: right; background: none; border: none; color: var(--text-secondary); font-size: 28px; cursor: pointer; line-height: 1; }
+        .modal-close:hover { color: var(--text-primary); }
+        .modal-head { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+        .modal-ticker { font-size: 32px; font-weight: 700; font-family: var(--font-mono); }
+        .modal-price { font-size: 28px; font-weight: 700; font-family: var(--font-mono); margin-left: auto; }
+        .detail-section { margin-bottom: 24px; }
+        .detail-section h3 { font-size: 13px; color: var(--accent-cyan); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 12px; }
+        .detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+
+        /* Tooltip */
+        .tip { position: relative; display: inline-block; cursor: help; margin-left: 3px; color: var(--text-muted); font-size: 12px; }
+        .tip .tip-text { visibility: hidden; width: 230px; background: var(--bg-secondary); color: var(--text-secondary); text-align: left; border-radius: 8px; padding: 10px 12px; position: absolute; z-index: 9999; bottom: 125%; left: 50%; transform: translateX(-50%); font-size: 12px; line-height: 1.4; border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,.5); text-transform: none; letter-spacing: normal; font-weight: 400; white-space: normal; pointer-events: none; }
+        .tip:hover .tip-text { visibility: visible; }
+        /* Tooltips na tabela: garante que th permita overflow */
+        .tbl th { position: relative; overflow: visible; }
+        .tbl thead { overflow: visible; }
+
+        /* Bubble Risk */
+        .bubble-section { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; margin-bottom: 24px; }
+        .bubble-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px; }
+        .bubble-title { font-size: 20px; font-weight: 700; }
+        .bubble-agg { text-align: right; }
+        .bubble-agg-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
+        .bubble-agg-score { font-size: 36px; font-weight: 800; font-family: var(--font-mono); }
+        .bubble-agg-level { font-size: 13px; font-weight: 500; }
+
+        .bubble-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
+        .bubble-card { background: var(--bg-secondary); border-radius: 12px; padding: 16px; text-align: center; border: 1px solid var(--border); transition: .2s; }
+        .bubble-card:hover { border-color: var(--accent-blue); }
+        .bubble-ticker { font-size: 16px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 8px; }
+
+        .gauge-wrap { position: relative; width: 100px; height: 54px; margin: 0 auto 8px; overflow: hidden; }
+        .gauge-bg { position: absolute; top: 0; left: 0; width: 100px; height: 100px; border-radius: 50%; border: 10px solid var(--border); border-bottom-color: transparent; border-left-color: transparent; transform: rotate(225deg); }
+        .gauge-fill { position: absolute; top: 0; left: 0; width: 100px; height: 100px; border-radius: 50%; border: 10px solid transparent; border-top-color: currentColor; border-right-color: currentColor; transform: rotate(225deg); transition: .6s; }
+        .gauge-score { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); font-size: 20px; font-weight: 800; font-family: var(--font-mono); }
+
+        .bubble-level { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+        .bubble-toprisk { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+        .level-low { color: var(--green); } .level-moderate { color: var(--yellow); }
+        .level-high { color: var(--orange); } .level-extreme { color: var(--red); }
+
+        .bubble-legend { display: flex; gap: 16px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+        .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+
+        /* Loading */
+        .loading { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; gap: 16px; }
+        .spinner { width: 48px; height: 48px; border: 3px solid var(--border); border-top-color: var(--accent-blue); border-radius: 50%; animation: spin .8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .footer { text-align: center; padding: 32px 0 16px; color: var(--text-muted); font-size: 12px; }
+
+        @media (max-width: 900px) {
+            .cards { grid-template-columns: 1fr; }
+            .charts-grid { grid-template-columns: 1fr; }
+            .metrics { grid-template-columns: repeat(2, 1fr); }
+            .summary { grid-template-columns: repeat(2, 1fr); }
+            .modal-head { flex-direction: column; align-items: flex-start; }
+            .modal-price { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+<div class="app" id="app">
+    <div class="loading" id="loading">
+        <div class="spinner"></div>
+        <div style="color: var(--text-secondary)">Carregando dados das Magnificent 7...</div>
+    </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <button class="modal-close" onclick="closeModal()">&times;</button>
+        <div id="modal-body"></div>
+    </div>
+</div>
+
+<script>
+// ==================== CONFIG ====================
+const COLORS = { AAPL:"#a3aaae", MSFT:"#00a4ef", GOOGL:"#4285f4", AMZN:"#ff9900", NVDA:"#76b900", META:"#0668e1", TSLA:"#cc0000" };
+
+const TIPS = {
+    peg_ratio: "PEG Ratio: Se > 2.2x, o ativo pode estar caro para seu crescimento.",
+    roic: "ROIC (via ROE): Retorno sobre capital. Abaixo de 20% indica perda de vantagem competitiva.",
+    fcf_yield: "FCF Yield: Fluxo de caixa livre / Market Cap. Abaixo de 3% sinaliza preco elevado.",
+    forward_pe: "Forward P/E: Preco / Lucro estimado proximos 12 meses.",
+    rsi_14: "RSI (14d): > 70 = sobrecompra. < 30 = sobrevenda.",
+    beta_90d: "Beta 90d: Volatilidade vs S&P 500. > 1.5 = muito arriscado.",
+    put_call_ratio: "Put/Call: > 1.0 = mais protecao comprada (bearish).",
+    capex_to_revenue: "CAPEX/Receita: Intensidade de investimento.",
+    ebitda_margin: "Margem EBITDA: Resiliencia operacional.",
+    price_to_sales: "P/S: Preco sobre Vendas. Niveis recordes = risco alto.",
+};
+
+// ==================== HELPERS ====================
+const fmt = (v, d=2) => v != null ? v.toFixed(d) : "N/A";
+const fmtPct = v => v != null ? v.toFixed(2) + "%" : "N/A";
+const fmtUSD = v => v != null ? "$" + v.toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2}) : "N/A";
+const fmtCap = v => { if(v==null) return "N/A"; if(v>=1e12) return "$"+(v/1e12).toFixed(2)+"T"; if(v>=1e9) return "$"+(v/1e9).toFixed(1)+"B"; return "$"+(v/1e6).toFixed(0)+"M"; };
+const tip = key => TIPS[key] ? `<span class="tip">&#9432;<span class="tip-text">${TIPS[key]}</span></span>` : "";
+const dotHtml = level => `<span class="dot dot-${level||'gray'}"></span>`;
+
+let DATA = null;
+let chartInstances = {};
+
+// ==================== FETCH ====================
+async function loadData() {
+    try {
+        const res = await fetch("/api/dashboard");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        DATA = await res.json();
+    } catch(e) {
+        console.warn("API indisponivel, verificando dados embutidos...", e);
+        if (window.__DEMO_DATA__) { DATA = window.__DEMO_DATA__; }
+        else { document.getElementById("loading").innerHTML = `<div style="color:var(--red)">Erro ao carregar: ${e.message}</div><div style="color:var(--text-secondary);font-size:13px;margin-top:8px">Execute: python main.py e acesse localhost:8000</div>`; return; }
+    }
+    render();
+}
+
+// ==================== RENDER ====================
+function render() {
+    const stocks = DATA.stocks || [];
+    const summary = DATA.market_summary || {};
+    const isDemo = DATA.is_demo;
+
+    // Best FCF
+    const bestFcf = stocks.filter(s => s.fcf_yield != null).sort((a,b) => b.fcf_yield - a.fcf_yield)[0];
+    const bestPeg = stocks.filter(s => s.peg_ratio != null && s.peg_ratio > 0).sort((a,b) => a.peg_ratio - b.peg_ratio)[0];
+
+    // Alerts
+    const alerts = [];
+    stocks.forEach(s => {
+        if(s.peg_alert==="red") alerts.push({t:"danger", m:`${s.ticker}: PEG em ${fmt(s.peg_ratio)} (> 2.2x)`});
+        if(s.fcf_yield_alert==="red") alerts.push({t:"danger", m:`${s.ticker}: FCF Yield em ${fmtPct(s.fcf_yield)} (< 3%)`});
+        if(s.rsi_alert==="red" && s.rsi_14>70) alerts.push({t:"warning", m:`${s.ticker}: RSI em ${fmt(s.rsi_14)} — sobrecompra`});
+        if(s.beta_alert==="red") alerts.push({t:"danger", m:`${s.ticker}: Beta ${fmt(s.beta_90d)} (> 1.5)`});
+        if(s.roic_alert==="red") alerts.push({t:"danger", m:`${s.ticker}: ROIC/ROE ${fmtPct(s.roic)} (< 20%)`});
+        if(s.fcf_yield_alert==="red" && s.fcf_yield!=null && s.fcf_yield<2) alerts.push({t:"danger", m:`${s.ticker}: FCF Yield critico ${fmtPct(s.fcf_yield)}`});
+    });
+
+    const now = new Date().toLocaleTimeString("pt-BR");
+    const hasDanger = alerts.some(a => a.t==="danger");
+
+    let html = `
+    <div class="header">
+        <div>
+            <h1>Magnificent 7 Dashboard</h1>
+            <div class="header-sub">Monitoramento de Valuation, Crescimento e Sentimento</div>
+        </div>
+        <div class="header-right">
+            <span class="badge ${isDemo ? 'badge-demo' : 'badge-live'}">${isDemo ? '&#9881; Modo Demo' : '&#9679; Atualizado ' + now}</span>
+            <button class="btn" onclick="refreshData()">Atualizar</button>
+        </div>
+    </div>
+
+    ${isDemo ? `<div class="demo-banner"><span style="font-size:18px">&#9881;</span><div><b>Modo Demo</b><br><span>Dados simulados. Na sua maquina com internet, dados reais serao carregados automaticamente via yfinance.</span></div></div>` : ''}
+
+    ${alerts.length > 0 ? `<div class="alerts ${hasDanger?'':'warning'}"><div class="alerts-title" style="color:${hasDanger?'var(--red)':'var(--yellow)'}">&#9888; ${alerts.length} alerta${alerts.length>1?'s':''}</div>${alerts.map(a=>`<div class="alert-item">${dotHtml(a.t==='danger'?'red':'yellow')} ${a.m}</div>`).join('')}</div>` : ''}
+
+    <div class="summary">
+        <div class="summary-item"><div class="summary-label">Market Cap Total</div><div class="summary-val">${fmtCap(summary.total_market_cap)}</div><div class="summary-detail">${stocks.length} empresas</div></div>
+        <div class="summary-item"><div class="summary-label">RSI Medio (M7)</div><div class="summary-val" style="color:${summary.all_overbought?'var(--red)':'var(--text-primary)'}">${fmt(summary.avg_rsi)}</div><div class="summary-detail">${summary.all_overbought?'TODAS em sobrecompra!':'Monitorando'}</div></div>
+        <div class="summary-item"><div class="summary-label">Melhor FCF Yield</div><div class="summary-val" style="color:var(--green)">${bestFcf ? bestFcf.ticker+' '+fmtPct(bestFcf.fcf_yield) : 'N/A'}</div><div class="summary-detail">Maior geracao de caixa</div></div>
+        <div class="summary-item"><div class="summary-label">Menor PEG</div><div class="summary-val" style="color:var(--accent-cyan)">${bestPeg ? bestPeg.ticker+' '+fmt(bestPeg.peg_ratio) : 'N/A'}</div><div class="summary-detail">Melhor preco/crescimento</div></div>
+    </div>
+
+    ${renderBubbleRisk(stocks, summary)}
+
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('cards',this)">Cards</button>
+        <button class="tab" onclick="switchTab('table',this)">Tabela</button>
+        <button class="tab" onclick="switchTab('charts',this)">Graficos</button>
+        <button class="tab" onclick="switchTab('performance',this)">Performance</button>
+    </div>
+
+    <!-- CARDS -->
+    <div class="tab-content active" id="tab-cards">
+        <div class="cards">${stocks.map(s => renderCard(s)).join('')}</div>
+    </div>
+
+    <!-- TABLE -->
+    <div class="tab-content" id="tab-table">${renderTable(stocks)}</div>
+
+    <!-- CHARTS -->
+    <div class="tab-content" id="tab-charts">
+        <div class="chart-section">
+            <div class="chart-header"><div class="chart-title">Valuation Comparativo</div></div>
+            <div class="chart-canvas-wrap"><canvas id="chart-valuation"></canvas></div>
+        </div>
+        <div class="charts-grid">
+            <div class="chart-section">
+                <div class="chart-header"><div class="chart-title">Sentimento & Risco</div></div>
+                <div class="chart-canvas-wrap"><canvas id="chart-radar"></canvas></div>
+            </div>
+            <div class="chart-section">
+                <div class="chart-header"><div class="chart-title">Market Cap (Peso Relativo)</div></div>
+                <div class="chart-canvas-wrap"><canvas id="chart-pie"></canvas></div>
+            </div>
+        </div>
+        <div class="chart-section">
+            <div class="chart-header"><div class="chart-title">CAPEX/Receita vs EBITDA Margin</div></div>
+            <div class="chart-canvas-wrap"><canvas id="chart-efficiency"></canvas></div>
+        </div>
+    </div>
+
+    <!-- PERFORMANCE -->
+    <div class="tab-content" id="tab-performance">
+        <div class="chart-section">
+            <div class="chart-header">
+                <div class="chart-title">Performance Comparativa (%)</div>
+                <div class="chart-controls">
+                    ${['1mo','3mo','6mo','1y'].map(p => `<button class="btn btn-sm ${p==='6mo'?'btn-active':''}" onclick="loadHistory('${p}',this)">${p}</button>`).join('')}
+                </div>
+            </div>
+            <div class="chart-controls" style="margin-bottom:16px">
+                ${Object.entries(COLORS).map(([t,c]) => `<button class="btn btn-sm ticker-toggle" data-ticker="${t}" style="border-color:${c};color:${c};background:${c}15" onclick="toggleTicker('${t}',this)">${t}</button>`).join('')}
+            </div>
+            <div class="chart-canvas-wrap" style="height:380px"><canvas id="chart-perf"></canvas></div>
+        </div>
+    </div>
+
+    <div class="footer">Dados via Yahoo Finance (yfinance) — Cache 5min — MVP v1.0<br>Cloud Revenue requer atualizacao manual pos-earnings</div>
+    `;
+
+    document.getElementById("app").innerHTML = html;
+
+    // Charts são renderizados ao clicar na aba (Chart.js precisa de canvas visivel)
+    // Pre-carrega dados de historico em background
+    loadHistory("6mo");
+}
+
+// ==================== BUBBLE RISK ====================
+function renderBubbleRisk(stocks, summary) {
+    const aggScore = summary.bubble_risk_index;
+    const aggLevel = aggScore >= 70 ? "extreme" : aggScore >= 50 ? "high" : aggScore >= 30 ? "moderate" : "low";
+    const aggLabel = { low: "Baixo", moderate: "Moderado", high: "Elevado", extreme: "Extremo" };
+    const levelColors = { low: "var(--green)", moderate: "var(--yellow)", high: "var(--orange)", extreme: "var(--red)" };
+
+    // Gauge angle: 0 score = 0deg, 100 score = 270deg
+    const gaugeAngle = (score) => Math.min(score / 100 * 270, 270);
+
+    function gaugeHtml(score, level, size) {
+        const s = size || 100;
+        const half = s / 2;
+        const thick = s / 10;
+        const color = levelColors[level] || "var(--text-muted)";
+        const angle = gaugeAngle(score || 0);
+        // SVG gauge arc
+        const radius = half - thick;
+        const startAngle = 135; // degrees
+        const endAngleBg = 405; // full arc background
+        const endAngleFill = startAngle + (angle / 270 * 270);
+
+        function polarToCartesian(cx, cy, r, angleDeg) {
+            const rad = (angleDeg - 90) * Math.PI / 180;
+            return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+        }
+        function arcPath(cx, cy, r, start, end) {
+            const s = polarToCartesian(cx, cy, r, start);
+            const e = polarToCartesian(cx, cy, r, end);
+            const large = (end - start) > 180 ? 1 : 0;
+            return "M " + s.x + " " + s.y + " A " + r + " " + r + " 0 " + large + " 1 " + e.x + " " + e.y;
+        }
+
+        return '<svg width="'+s+'" height="'+(half+8)+'" viewBox="0 0 '+s+' '+(half+8)+'">' +
+            '<path d="'+arcPath(half, half, radius, 135, 405)+'" fill="none" stroke="var(--border)" stroke-width="'+thick+'" stroke-linecap="round"/>' +
+            (score != null ? '<path d="'+arcPath(half, half, radius, 135, Math.min(135 + angle, 405))+'" fill="none" stroke="'+color+'" stroke-width="'+thick+'" stroke-linecap="round"/>' : '') +
+            '<text x="'+half+'" y="'+(half+4)+'" text-anchor="middle" fill="'+color+'" font-size="'+(s/4.5)+'" font-weight="800" font-family="var(--font-mono)">'+(score != null ? score.toFixed(0) : "N/A")+'</text>' +
+            '</svg>';
+    }
+
+    return `
+    <div class="bubble-section">
+        <div class="bubble-header">
+            <div>
+                <div class="bubble-title">Indice de Risco de Bolha
+                    <span class="tip">&#9432;<span class="tip-text">Score composto de 0-100 que sintetiza PEG, FCF Yield, P/S, RSI, Forward P/E, Beta e Put/Call Ratio. Quanto maior, mais sinais de excesso e euforia convergem simultaneamente.</span></span>
+                </div>
+                <div style="font-size:13px;color:var(--text-secondary);margin-top:4px">Sintese ponderada por Market Cap de 7 indicadores de excesso</div>
+            </div>
+            <div class="bubble-agg">
+                <div class="bubble-agg-label">Indice Agregado M7</div>
+                <div class="bubble-agg-score level-${aggLevel}">${aggScore != null ? aggScore.toFixed(1) : 'N/A'}</div>
+                <div class="bubble-agg-level level-${aggLevel}">${aggLabel[aggLevel] || ''}</div>
+                ${summary.convergence_detail ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+                    Base ${summary.convergence_detail.base_score}
+                    ${summary.convergence_detail.convergence_premium > 0 ? ' + Converg. +' + summary.convergence_detail.convergence_premium : ''}
+                    ${summary.convergence_detail.concentration_premium > 0 ? ' + Conc. +' + summary.convergence_detail.concentration_premium : ''}
+                    <span class="tip">&#9432;<span class="tip-text">Premio de convergencia: quando muitas acoes estao em risco simultaneamente, o risco sistemico e maior que a media. ${summary.convergence_detail.elevated_count}/${summary.convergence_detail.total_count} acoes em nivel elevado (>35).</span></span>
+                </div>` : ''}
+            </div>
+        </div>
+        <div class="bubble-grid">
+            ${stocks.map(s => {
+                const br = s.bubble_risk || {};
+                const score = br.score;
+                const level = br.level || "low";
+                return `<div class="bubble-card">
+                    <div class="bubble-ticker" style="color:${COLORS[s.ticker]}">${s.ticker}</div>
+                    ${gaugeHtml(score, level, 110)}
+                    <div class="bubble-level level-${level}">${({low:"Baixo",moderate:"Moderado",high:"Elevado",extreme:"Extremo"})[level]||"N/A"}</div>
+                    <div class="bubble-toprisk">${br.top_risk ? 'Principal: '+br.top_risk : ''}</div>
+                </div>`;
+            }).join('')}
+        </div>
+        <div class="bubble-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> 0-30 Baixo</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--yellow)"></div> 30-50 Moderado</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> 50-70 Elevado</div>
+            <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> 70-100 Extremo</div>
+        </div>
+    </div>`;
+}
+
+// ==================== CARD ====================
+function renderCard(s) {
+    return `
+    <div class="card" onclick="openModal('${s.ticker}')">
+        <div class="card-head">
+            <div><div class="card-ticker" style="color:${COLORS[s.ticker]}">${s.ticker}</div><div class="card-name">${s.name}</div></div>
+            <div><div class="card-price">${fmtUSD(s.current_price)}</div><div class="card-mcap">${fmtCap(s.market_cap)}</div></div>
+        </div>
+        <div class="metrics">
+            <div class="metric ${s.peg_alert}"><div class="metric-label">PEG ${tip('peg_ratio')}</div><div class="metric-val">${fmt(s.peg_ratio)}</div></div>
+            <div class="metric ${s.fcf_yield_alert}"><div class="metric-label">FCF Yield ${tip('fcf_yield')}</div><div class="metric-val">${fmtPct(s.fcf_yield)}</div></div>
+            <div class="metric ${s.rsi_alert}"><div class="metric-label">RSI 14d ${tip('rsi_14')}</div><div class="metric-val">${fmt(s.rsi_14)}</div></div>
+            <div class="metric ${s.beta_alert}"><div class="metric-label">Beta 90d ${tip('beta_90d')}</div><div class="metric-val">${fmt(s.beta_90d)}</div></div>
+            <div class="metric ${s.roic_alert}"><div class="metric-label">ROIC/ROE ${tip('roic')}</div><div class="metric-val">${fmtPct(s.roic)}</div></div>
+            <div class="metric gray"><div class="metric-label">Fwd P/E ${tip('forward_pe')}</div><div class="metric-val">${fmt(s.forward_pe)}</div></div>
+        </div>
+    </div>`;
+}
+
+// ==================== TABLE ====================
+let sortKey = "ticker", sortAsc = true;
+function renderTable(stocks) {
+    const sorted = [...stocks].sort((a,b) => {
+        let va = a[sortKey], vb = b[sortKey];
+        if(va==null) va = -Infinity; if(vb==null) vb = -Infinity;
+        if(typeof va==='string') return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+        return sortAsc ? va-vb : vb-va;
+    });
+    const arrow = k => sortKey===k ? (sortAsc?'&#9650;':'&#9660;') : '';
+    const th = (label, key, tipKey) => `<th onclick="sortTable('${key}')">${label}${tipKey?tip(tipKey):''} <span style="font-size:10px">${arrow(key)}</span></th>`;
+    return `<div class="table-wrap"><div class="table-title">Tabela Comparativa</div><div style="overflow-x:auto;overflow-y:visible;padding-top:4px"><table class="tbl"><thead><tr>
+        ${th('Ticker','ticker')} ${th('Preco','current_price')} ${th('PEG','peg_ratio','peg_ratio')}
+        ${th('Fwd P/E','forward_pe','forward_pe')} ${th('P/S','price_to_sales','price_to_sales')}
+        ${th('FCF Yield','fcf_yield','fcf_yield')} ${th('ROIC/ROE','roic','roic')}
+        ${th('EBITDA Mg','ebitda_margin','ebitda_margin')} ${th('CAPEX/Rev','capex_to_revenue','capex_to_revenue')}
+        ${th('RSI','rsi_14','rsi_14')} ${th('Beta','beta_90d','beta_90d')} ${th('P/C Ratio','put_call_ratio','put_call_ratio')}
+    </tr></thead><tbody>
+        ${sorted.map(s => `<tr>
+            <td class="tk" style="color:${COLORS[s.ticker]}">${s.ticker}</td>
+            <td>${fmtUSD(s.current_price)}</td>
+            <td>${dotHtml(s.peg_alert)} ${fmt(s.peg_ratio)}</td>
+            <td>${fmt(s.forward_pe)}</td>
+            <td>${fmt(s.price_to_sales)}</td>
+            <td>${dotHtml(s.fcf_yield_alert)} ${fmtPct(s.fcf_yield)}</td>
+            <td>${dotHtml(s.roic_alert)} ${fmtPct(s.roic)}</td>
+            <td>${fmtPct(s.ebitda_margin)}</td>
+            <td>${fmtPct(s.capex_to_revenue)}</td>
+            <td>${dotHtml(s.rsi_alert)} ${fmt(s.rsi_14)}</td>
+            <td>${dotHtml(s.beta_alert)} ${fmt(s.beta_90d)}</td>
+            <td>${fmt(s.put_call_ratio)}</td>
+        </tr>`).join('')}
+    </tbody></table></div></div>`;
+}
+
+function sortTable(key) {
+    if(sortKey===key) sortAsc=!sortAsc; else { sortKey=key; sortAsc=true; }
+    document.getElementById("tab-table").innerHTML = renderTable(DATA.stocks);
+}
+
+// ==================== CHARTS ====================
+function destroyChart(id) { if(chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; } }
+
+function renderCharts(stocks) {
+    if(typeof Chart === "undefined") { console.error("Chart.js nao carregou"); return; }
+    // Valuation Bar + Line
+    destroyChart("valuation");
+    const ctx1 = document.getElementById("chart-valuation");
+    if(ctx1) {
+        chartInstances["valuation"] = new Chart(ctx1, {
+            type: "bar",
+            data: {
+                labels: stocks.map(s => s.ticker),
+                datasets: [
+                    { label: "Forward P/E", data: stocks.map(s => s.forward_pe), backgroundColor: "rgba(59,130,246,.7)", borderRadius: 4, order: 2 },
+                    { label: "PEG Ratio", data: stocks.map(s => s.peg_ratio), backgroundColor: "rgba(139,92,246,.7)", borderRadius: 4, order: 3 },
+                    { label: "FCF Yield %", data: stocks.map(s => s.fcf_yield), type: "line", borderColor: "#22c55e", backgroundColor: "transparent", pointRadius: 5, pointBackgroundColor: "#22c55e", yAxisID: "y1", order: 1 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: "#9aa0b0" } },
+                    annotation: {}
+                },
+                scales: {
+                    x: { ticks: { color: "#6b7280" }, grid: { color: "#2a2d3e" } },
+                    y: { ticks: { color: "#6b7280" }, grid: { color: "#2a2d3e" }, position: "left" },
+                    y1: { ticks: { color: "#22c55e" }, grid: { display: false }, position: "right" },
+                }
+            }
+        });
+    }
+
+    // Radar
+    destroyChart("radar");
+    const ctx2 = document.getElementById("chart-radar");
+    if(ctx2) {
+        chartInstances["radar"] = new Chart(ctx2, {
+            type: "radar",
+            data: {
+                labels: ["RSI", "Beta (x40)", "P/C Ratio (x50)", "CAPEX/Rev", "FCF Yield (x10)"],
+                datasets: stocks.map(s => ({
+                    label: s.ticker,
+                    data: [s.rsi_14||0, Math.min((s.beta_90d||0)*40,100), Math.min((s.put_call_ratio||0)*50,100), s.capex_to_revenue||0, Math.min((s.fcf_yield||0)*10,100)],
+                    borderColor: COLORS[s.ticker], backgroundColor: COLORS[s.ticker]+"15",
+                    borderWidth: 2, pointRadius: 3,
+                }))
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: "#9aa0b0", font: { size: 11 } } } },
+                scales: {
+                    r: {
+                        angleLines: { color: "#2a2d3e" }, grid: { color: "#2a2d3e" },
+                        pointLabels: { color: "#9aa0b0", font: { size: 11 } },
+                        ticks: { color: "#6b7280", backdropColor: "transparent" },
+                        suggestedMin: 0, suggestedMax: 100,
+                    }
+                }
+            }
+        });
+    }
+
+    // Pie
+    destroyChart("pie");
+    const ctx3 = document.getElementById("chart-pie");
+    if(ctx3) {
+        chartInstances["pie"] = new Chart(ctx3, {
+            type: "doughnut",
+            data: {
+                labels: stocks.map(s => s.ticker),
+                datasets: [{ data: stocks.map(s => s.market_cap||0), backgroundColor: stocks.map(s => COLORS[s.ticker]), borderWidth: 0 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, cutout: "55%",
+                plugins: {
+                    legend: { position: "right", labels: { color: "#9aa0b0", padding: 12 } },
+                    tooltip: { callbacks: { label: ctx => ctx.label + ": " + fmtCap(ctx.raw) } }
+                }
+            }
+        });
+    }
+
+    // Efficiency: CAPEX vs EBITDA
+    destroyChart("efficiency");
+    const ctx4 = document.getElementById("chart-efficiency");
+    if(ctx4) {
+        chartInstances["efficiency"] = new Chart(ctx4, {
+            type: "bar",
+            data: {
+                labels: stocks.map(s => s.ticker),
+                datasets: [
+                    { label: "CAPEX/Receita %", data: stocks.map(s => s.capex_to_revenue), backgroundColor: "rgba(249,115,22,.7)", borderRadius: 4 },
+                    { label: "EBITDA Margin %", data: stocks.map(s => s.ebitda_margin), backgroundColor: "rgba(6,182,212,.7)", borderRadius: 4 },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { labels: { color: "#9aa0b0" } } },
+                scales: {
+                    x: { ticks: { color: "#6b7280" }, grid: { color: "#2a2d3e" } },
+                    y: { ticks: { color: "#6b7280", callback: v => v+"%" }, grid: { color: "#2a2d3e" } },
+                }
+            }
+        });
+    }
+}
+
+// ==================== PERFORMANCE ====================
+let selectedTickers = new Set(["AAPL","MSFT","NVDA","GOOGL"]);
+let historyCache = {};
+
+function toggleTicker(ticker, el) {
+    if(selectedTickers.has(ticker)) { selectedTickers.delete(ticker); el.style.opacity = ".3"; }
+    else { selectedTickers.add(ticker); el.style.opacity = "1"; }
+    renderPerfChart();
+}
+
+async function loadHistory(period, btnEl) {
+    if(btnEl) {
+        document.querySelectorAll("#tab-performance .chart-controls:first-of-type .btn").forEach(b => b.classList.remove("btn-active"));
+        btnEl.classList.add("btn-active");
+    }
+    const tickers = Object.keys(COLORS);
+    for(const t of tickers) {
+        const key = t + "_" + period;
+        if(historyCache[key]) continue;
+
+        // Primeiro tenta dados embutidos (modo standalone)
+        if(window.__HISTORY_DATA__ && window.__HISTORY_DATA__[key]) {
+            historyCache[key] = window.__HISTORY_DATA__[key];
+            continue;
+        }
+
+        // Depois tenta a API (modo servidor)
+        try {
+            const res = await fetch("/api/history/" + t + "?period=" + period);
+            if(res.ok) historyCache[key] = await res.json();
+        } catch(e) {
+            console.warn("Sem dados de historico para " + t, e);
+        }
+    }
+    window._currentPeriod = period;
+    renderPerfChart();
+    // Set initial toggle opacity
+    document.querySelectorAll(".ticker-toggle").forEach(el => {
+        el.style.opacity = selectedTickers.has(el.dataset.ticker) ? "1" : ".3";
+    });
+}
+
+function renderPerfChart() {
+    if(typeof Chart === "undefined") return;
+    const period = window._currentPeriod || "6mo";
+    destroyChart("perf");
+    const ctx = document.getElementById("chart-perf");
+    if(!ctx) return;
+
+    const datasets = [];
+    for(const ticker of selectedTickers) {
+        const raw = historyCache[ticker + "_" + period];
+        if(!raw || raw.length === 0) continue;
+        const firstClose = raw[0].close;
+        datasets.push({
+            label: ticker,
+            data: raw.map(d => ({ x: d.date, y: parseFloat((((d.close - firstClose) / firstClose) * 100).toFixed(2)) })),
+            borderColor: COLORS[ticker], backgroundColor: COLORS[ticker]+"10",
+            borderWidth: 2, pointRadius: 0, fill: true, tension: .3,
+        });
+    }
+
+    chartInstances["perf"] = new Chart(ctx, {
+        type: "line",
+        data: { datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+                legend: { labels: { color: "#9aa0b0" } },
+                tooltip: { callbacks: { label: ctx => ctx.dataset.label + ": " + ctx.parsed.y.toFixed(2) + "%" } }
+            },
+            scales: {
+                x: { type: "category", ticks: { color: "#6b7280", maxTicksLimit: 12, callback: function(val) { const d = this.getLabelForValue(val); const dt = new Date(d); return dt.getDate() + "/" + (dt.getMonth()+1); } }, grid: { color: "#2a2d3e" } },
+                y: { ticks: { color: "#6b7280", callback: v => v+"%" }, grid: { color: "#2a2d3e" } }
+            }
+        }
+    });
+}
+
+// ==================== TABS ====================
+function switchTab(id, el) {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
+    el.classList.add("active");
+    document.getElementById("tab-" + id).classList.add("active");
+
+    // Re-render charts when switching to charts tab (Chart.js needs visible canvas)
+    if(id === "charts") setTimeout(() => renderCharts(DATA.stocks), 50);
+    if(id === "performance") setTimeout(() => renderPerfChart(), 50);
+}
+
+// ==================== MODAL ====================
+function openModal(ticker) {
+    const s = DATA.stocks.find(x => x.ticker === ticker);
+    if(!s) return;
+    const m = (label, key, val, alert) => `<div class="metric ${alert||'gray'}"><div class="metric-label">${label} ${tip(key)}</div><div class="metric-val">${val}</div></div>`;
+
+    document.getElementById("modal-body").innerHTML = `
+        <div class="modal-head">
+            <div class="modal-ticker" style="color:${COLORS[s.ticker]}">${s.ticker}</div>
+            <div><div style="font-size:18px;font-weight:600">${s.name}</div><div style="color:var(--text-secondary);font-size:13px">${s.sector||''}</div></div>
+            <div class="modal-price">${fmtUSD(s.current_price)}<br><span style="font-size:13px;color:var(--text-muted)">${fmtCap(s.market_cap)}</span></div>
+        </div>
+        <div class="detail-section"><h3>Valuation</h3><div class="detail-grid">
+            ${m('PEG Ratio','peg_ratio',fmt(s.peg_ratio),s.peg_alert)}
+            ${m('Forward P/E','forward_pe',fmt(s.forward_pe))}
+            ${m('Trailing P/E','',fmt(s.trailing_pe))}
+            ${m('FCF Yield','fcf_yield',fmtPct(s.fcf_yield),s.fcf_yield_alert)}
+            ${m('P/S','price_to_sales',fmt(s.price_to_sales))}
+            ${m('ROIC/ROE','roic',fmtPct(s.roic),s.roic_alert)}
+        </div></div>
+        <div class="detail-section"><h3>Crescimento & Eficiencia</h3><div class="detail-grid">
+            ${m('EBITDA Margin','ebitda_margin',fmtPct(s.ebitda_margin))}
+            ${m('CAPEX/Receita','capex_to_revenue',fmtPct(s.capex_to_revenue))}
+            ${m('Rev. Growth','',fmtPct(s.revenue_growth))}
+            ${m('Dividend Yield','',fmtPct(s.dividend_yield))}
+        </div></div>
+        <div class="detail-section"><h3>Sentimento & Risco</h3><div class="detail-grid">
+            ${m('RSI (14d)','rsi_14',fmt(s.rsi_14),s.rsi_alert)}
+            ${m('Beta 90d','beta_90d',fmt(s.beta_90d),s.beta_alert)}
+            ${m('Put/Call','put_call_ratio',fmt(s.put_call_ratio))}
+            ${m('52W Range','',fmtUSD(s.fifty_two_week_low)+' — '+fmtUSD(s.fifty_two_week_high))}
+        </div></div>
+    `;
+    document.getElementById("modal").classList.add("open");
+}
+
+function closeModal() { document.getElementById("modal").classList.remove("open"); }
+document.getElementById("modal").addEventListener("click", e => { if(e.target.id==="modal") closeModal(); });
+
+async function refreshData() {
+    try { await fetch("/api/cache/clear"); } catch(e) {}
+    loadData();
+}
+
+// ==================== INIT ====================
+loadData();
+</script>
+</body>
+</html>
