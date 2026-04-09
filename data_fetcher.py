@@ -546,15 +546,8 @@ def fetch_price_history(ticker_symbol: str, period: str = "1y") -> list:
 
 
 def _check_connectivity() -> bool:
-    """Verifica se consegue acessar o Yahoo Finance."""
-    if not YFINANCE_AVAILABLE:
-        return False
-    try:
-        ticker = yf.Ticker("AAPL")
-        info = ticker.info
-        return info is not None and len(info) > 5
-    except Exception:
-        return False
+    """Verifica se yfinance está instalado (não faz request de rede)."""
+    return YFINANCE_AVAILABLE
 
 
 # ==================== DADOS DEMO ====================
@@ -696,46 +689,59 @@ def _generate_demo_stock(ticker_symbol: str) -> Dict[str, Any]:
 def fetch_all_mag7() -> Dict[str, Any]:
     """
     Busca dados de todas as Magnificent 7 de uma vez.
-    Tenta dados reais via yfinance; se falhar, usa dados demo.
+    Tenta dados reais via yfinance POR TICKER; se um falhar, só aquele usa demo.
 
     Retorna um dicionário com:
     - stocks: lista com dados de cada ação
     - market_summary: resumo do mercado (RSI médio, etc.)
     - thresholds: limiares de alerta para o frontend
     - updated_at: timestamp da última atualização
-    - is_demo: se está usando dados demo
+    - is_demo: True somente se TODOS os tickers falharam
     """
     logger.info("Iniciando coleta de dados das Magnificent 7...")
 
-    # Verifica conectividade
-    use_live = _check_connectivity()
+    can_use_yfinance = _check_connectivity()
 
-    if use_live:
-        logger.info("Conectividade OK — usando dados reais via yfinance")
+    # Busca S&P 500 para cálculo de Beta (uma vez só)
+    sp500_prices = pd.Series()
+    if can_use_yfinance:
         sp500_prices = fetch_sp500_prices()
+        logger.info("yfinance disponível — tentando dados reais por ticker")
     else:
-        logger.info("Sem conectividade com Yahoo Finance — usando dados demo")
-        sp500_prices = pd.Series()
+        logger.info("yfinance não instalado — usando dados demo")
 
     stocks = []
     errors = []
+    live_count = 0
 
     for ticker_symbol in MAG7_TICKERS:
-        try:
-            if use_live:
+        stock_data = None
+
+        # Tenta dados reais primeiro
+        if can_use_yfinance:
+            try:
                 logger.info(f"Buscando dados reais de {ticker_symbol}...")
                 stock_data = fetch_single_stock(ticker_symbol, sp500_prices)
-            else:
-                stock_data = _generate_demo_stock(ticker_symbol)
-            stocks.append(stock_data)
-        except Exception as e:
-            logger.error(f"Erro ao buscar {ticker_symbol}: {e}")
-            logger.error(traceback.format_exc())
-            # Fallback para demo se falhar
+                # Valida que recebeu dados reais (não um dict vazio do yfinance)
+                if stock_data and stock_data.get("current_price") is not None:
+                    live_count += 1
+                    logger.info(f"  ✓ {ticker_symbol}: ${stock_data['current_price']}")
+                else:
+                    logger.warning(f"  ✗ {ticker_symbol}: dados incompletos, usando demo")
+                    stock_data = None
+            except Exception as e:
+                logger.warning(f"  ✗ {ticker_symbol}: {e}")
+                stock_data = None
+
+        # Fallback para demo se real falhou
+        if stock_data is None:
             try:
-                stocks.append(_generate_demo_stock(ticker_symbol))
-            except Exception:
-                errors.append({"ticker": ticker_symbol, "error": str(e)})
+                stock_data = _generate_demo_stock(ticker_symbol)
+            except Exception as e2:
+                errors.append({"ticker": ticker_symbol, "error": str(e2)})
+                continue
+
+        stocks.append(stock_data)
 
     # Calcula resumo do mercado
     rsi_values = [s["rsi_14"] for s in stocks if s.get("rsi_14") is not None]
@@ -804,11 +810,16 @@ def fetch_all_mag7() -> Dict[str, Any]:
         "convergence_detail": convergence_detail,
     }
 
+    # is_demo = True somente se NENHUM ticker retornou dados reais
+    all_demo = live_count == 0
+
     return {
         "stocks": stocks,
         "market_summary": market_summary,
         "thresholds": ALERT_THRESHOLDS,
         "errors": errors,
         "updated_at": datetime.now().isoformat(),
-        "is_demo": not use_live,
+        "is_demo": all_demo,
+        "live_count": live_count,
+        "total_count": len(MAG7_TICKERS),
     }

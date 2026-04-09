@@ -253,12 +253,13 @@ function render() {
             <div class="header-sub">Monitoramento de Valuation, Crescimento e Sentimento</div>
         </div>
         <div class="header-right">
-            <span class="badge ${isDemo ? 'badge-demo' : 'badge-live'}">${isDemo ? '&#9881; Modo Demo' : '&#9679; Atualizado ' + now}</span>
+            <span class="badge ${isDemo ? 'badge-demo' : 'badge-live'}">${isDemo ? '&#9881; Modo Demo' : '&#9679; Live ' + (DATA.live_count||stocks.length) + '/' + (DATA.total_count||7) + ' — ' + now}</span>
             <button class="btn" onclick="refreshData()">Atualizar</button>
         </div>
     </div>
 
-    ${isDemo ? `<div class="demo-banner"><span style="font-size:18px">&#9881;</span><div><b>Modo Demo</b><br><span>Dados simulados. Na sua maquina com internet, dados reais serao carregados automaticamente via yfinance.</span></div></div>` : ''}
+    ${isDemo ? `<div class="demo-banner"><span style="font-size:18px">&#9881;</span><div><b>Modo Demo</b><br><span>yfinance nao conseguiu conectar ao Yahoo Finance. Verifique conectividade do servidor.</span></div></div>` : ''}
+    ${!isDemo && DATA.live_count < DATA.total_count ? `<div class="demo-banner" style="background:rgba(234,179,8,.1);border-color:rgba(234,179,8,.3)"><span style="font-size:18px">&#9888;</span><div><b>${DATA.live_count}/${DATA.total_count} tickers ao vivo</b><br><span>Alguns tickers retornaram dados demo. Isso pode ser rate limiting temporario do Yahoo Finance.</span></div></div>` : ''}
 
     ${alerts.length > 0 ? `<div class="alerts ${hasDanger?'':'warning'}"><div class="alerts-title" style="color:${hasDanger?'var(--red)':'var(--yellow)'}">&#9888; ${alerts.length} alerta${alerts.length>1?'s':''}</div>${alerts.map(a=>`<div class="alert-item">${dotHtml(a.t==='danger'?'red':'yellow')} ${a.m}</div>`).join('')}</div>` : ''}
 
