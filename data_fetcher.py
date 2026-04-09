@@ -79,7 +79,7 @@ def _get_yahoo_crumb() -> Optional[str]:
 
 def _yahoo_api_quote(ticker_symbol: str) -> Optional[Dict]:
     """Busca dados de uma ação via Yahoo Finance API v10/quoteSummary (fallback)."""
-    modules = "price,summaryDetail,defaultKeyStatistics,financialData,earnings,cashflowStatementHistory,incomeStatementHistory"
+    modules = "price,summaryDetail,defaultKeyStatistics,financialData"
     url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker_symbol}"
     crumb = _get_yahoo_crumb()
     params = {"modules": modules}
@@ -178,8 +178,6 @@ def _parse_yahoo_api_to_stock(ticker_symbol: str, api_data: Dict, sp500_prices: 
         detail = api_data.get("summaryDetail", {})
         stats = api_data.get("defaultKeyStatistics", {})
         fin = api_data.get("financialData", {})
-        cf_hist = api_data.get("cashflowStatementHistory", {})
-        inc_hist = api_data.get("incomeStatementHistory", {})
 
         def raw(d, key):
             """Extrai valor de dict Yahoo API (pode ser {raw:x, fmt:'y'} ou valor direto)."""
@@ -231,18 +229,19 @@ def _parse_yahoo_api_to_stock(ticker_symbol: str, api_data: Dict, sp500_prices: 
         rg = raw(fin, "revenueGrowth")
         result["revenue_growth"] = round(rg * 100, 2) if rg else None
 
-        # CAPEX / Revenue — extraído dos demonstrativos financeiros
+        # CAPEX / Revenue — calculado como (Operating CF - Free CF) / Revenue
+        # CAPEX = Operating Cashflow - Free Cashflow (aproximação padrão)
         result["capex_to_revenue"] = None
         try:
-            cf_stmts = cf_hist.get("cashflowStatements", [])
-            inc_stmts = inc_hist.get("incomeStatementHistory", [])
-            if cf_stmts and inc_stmts:
-                capex = abs(raw(cf_stmts[0], "capitalExpenditures") or 0)
-                revenue = raw(inc_stmts[0], "totalRevenue") or 0
-                if capex > 0 and revenue > 0:
-                    result["capex_to_revenue"] = round((capex / revenue) * 100, 2)
+            ocf = raw(fin, "operatingCashflow")
+            fcf_val = raw(fin, "freeCashflow")
+            rev = raw(fin, "totalRevenue")
+            if ocf and fcf_val and rev and rev > 0:
+                capex = abs(ocf - fcf_val)
+                if capex > 0:
+                    result["capex_to_revenue"] = round((capex / rev) * 100, 2)
         except Exception as e:
-            logger.debug(f"CAPEX parse error {ticker_symbol}: {e}")
+            logger.debug(f"CAPEX calc error {ticker_symbol}: {e}")
 
         result["dividend_yield"] = raw(detail, "dividendYield")
         if result["dividend_yield"]:
