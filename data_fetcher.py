@@ -33,9 +33,15 @@ except ImportError:
 # Usa a API pública do Yahoo Finance v8 com headers de browser.
 
 _YAHOO_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Cache-Control": "no-cache",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Upgrade-Insecure-Requests": "1",
 }
 _yahoo_session = requests.Session()
 _yahoo_session.headers.update(_YAHOO_HEADERS)
@@ -44,30 +50,37 @@ _yahoo_crumb_ts = 0
 
 
 def _get_yahoo_crumb() -> Optional[str]:
-    """Obtém crumb do Yahoo Finance (necessário para API v8)."""
+    """Obtém crumb do Yahoo Finance (necessário para API v8+)."""
     global _yahoo_crumb, _yahoo_crumb_ts
     # Cache crumb por 30min
     if _yahoo_crumb and (_time.time() - _yahoo_crumb_ts < 1800):
         return _yahoo_crumb
-    try:
-        # Visita uma página para obter cookies
-        _yahoo_session.get("https://finance.yahoo.com/quote/AAPL", timeout=10)
-        # Obtém crumb
-        resp = _yahoo_session.get("https://query2.finance.yahoo.com/v1/test/getcrumb", timeout=10)
-        if resp.status_code == 200 and resp.text:
-            _yahoo_crumb = resp.text.strip()
-            _yahoo_crumb_ts = _time.time()
-            logger.info(f"Yahoo crumb obtido: {_yahoo_crumb[:8]}...")
-            return _yahoo_crumb
-    except Exception as e:
-        logger.warning(f"Falha ao obter Yahoo crumb: {e}")
+
+    # Tenta múltiplos endpoints/hosts
+    hosts = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"]
+    for host in hosts:
+        try:
+            # Primeiro obtém cookies visitando a página
+            _yahoo_session.get("https://fc.yahoo.com", timeout=10, allow_redirects=True)
+            # Agora busca crumb
+            resp = _yahoo_session.get(f"https://{host}/v1/test/getcrumb", timeout=10)
+            if resp.status_code == 200 and resp.text and "Too Many" not in resp.text:
+                _yahoo_crumb = resp.text.strip()
+                _yahoo_crumb_ts = _time.time()
+                logger.info(f"Yahoo crumb obtido via {host}: {_yahoo_crumb[:8]}...")
+                return _yahoo_crumb
+            else:
+                logger.warning(f"Crumb via {host}: status={resp.status_code} body={resp.text[:50]}")
+        except Exception as e:
+            logger.warning(f"Falha crumb via {host}: {e}")
+
     return None
 
 
 def _yahoo_api_quote(ticker_symbol: str) -> Optional[Dict]:
     """Busca dados de uma ação via Yahoo Finance API v10/quoteSummary (fallback)."""
     modules = "price,summaryDetail,defaultKeyStatistics,financialData,earnings"
-    url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{ticker_symbol}"
+    url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker_symbol}"
     crumb = _get_yahoo_crumb()
     params = {"modules": modules}
     if crumb:
@@ -84,7 +97,7 @@ def _yahoo_api_quote(ticker_symbol: str) -> Optional[Dict]:
 
     # Fallback: tenta v6 quote
     try:
-        url2 = f"https://query2.finance.yahoo.com/v6/finance/quote"
+        url2 = f"https://query1.finance.yahoo.com/v6/finance/quote"
         resp2 = _yahoo_session.get(url2, params={"symbols": ticker_symbol}, timeout=15)
         if resp2.status_code == 200:
             data2 = resp2.json()
@@ -102,7 +115,7 @@ def _yahoo_api_history(ticker_symbol: str, period: str = "6mo") -> Optional[pd.D
     period_map = {"1mo": "1mo", "3mo": "3mo", "6mo": "6mo", "1y": "1y", "2y": "2y", "5y": "5y"}
     yperiod = period_map.get(period, "6mo")
 
-    url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_symbol}"
     params = {"range": yperiod, "interval": "1d", "includePrePost": "false"}
     crumb = _get_yahoo_crumb()
     if crumb:
@@ -941,38 +954,43 @@ def fetch_all_mag7() -> Dict[str, Any]:
     errors = []
     live_count = 0
 
-    for ticker_symbol in MAG7_TICKERS:
+    for idx, ticker_symbol in enumerate(MAG7_TICKERS):
         stock_data = None
 
-        # Estratégia: yfinance → Yahoo API direta → demo
+        # Delay entre tickers para evitar 429 (exceto o primeiro)
+        if idx > 0 and can_use_yfinance:
+            _time.sleep(1.5)
+
+        # Estratégia: Yahoo API direta → yfinance → demo
+        # (Yahoo API direta primeiro porque yfinance usa query2 que é mais rate-limited)
         if can_use_yfinance:
-            # Tentativa 1: yfinance
+            # Tentativa 1: Yahoo API direta (mais leve, usa query1)
             try:
-                logger.info(f"[yfinance] Buscando {ticker_symbol}...")
-                stock_data = fetch_single_stock(ticker_symbol, sp500_prices)
-                if stock_data and stock_data.get("current_price") is not None:
-                    live_count += 1
-                    logger.info(f"  ✓ {ticker_symbol}: ${stock_data['current_price']} (yfinance)")
-                else:
-                    stock_data = None
+                logger.info(f"[Yahoo API] Buscando {ticker_symbol}...")
+                api_data = _yahoo_api_quote(ticker_symbol)
+                if api_data:
+                    stock_data = _parse_yahoo_api_to_stock(ticker_symbol, api_data, sp500_prices)
+                    if stock_data and stock_data.get("current_price") is not None:
+                        live_count += 1
+                        logger.info(f"  ✓ {ticker_symbol}: ${stock_data['current_price']} (Yahoo API)")
+                    else:
+                        stock_data = None
             except Exception as e:
-                logger.warning(f"  ✗ yfinance {ticker_symbol}: {e}")
+                logger.warning(f"  ✗ Yahoo API {ticker_symbol}: {e}")
                 stock_data = None
 
-            # Tentativa 2: Yahoo API direta (se yfinance falhou)
+            # Tentativa 2: yfinance (se API direta falhou)
             if stock_data is None:
                 try:
-                    logger.info(f"[Yahoo API] Tentando {ticker_symbol}...")
-                    api_data = _yahoo_api_quote(ticker_symbol)
-                    if api_data:
-                        stock_data = _parse_yahoo_api_to_stock(ticker_symbol, api_data, sp500_prices)
-                        if stock_data and stock_data.get("current_price") is not None:
-                            live_count += 1
-                            logger.info(f"  ✓ {ticker_symbol}: ${stock_data['current_price']} (Yahoo API)")
-                        else:
-                            stock_data = None
+                    logger.info(f"[yfinance] Tentando {ticker_symbol}...")
+                    stock_data = fetch_single_stock(ticker_symbol, sp500_prices)
+                    if stock_data and stock_data.get("current_price") is not None:
+                        live_count += 1
+                        logger.info(f"  ✓ {ticker_symbol}: ${stock_data['current_price']} (yfinance)")
+                    else:
+                        stock_data = None
                 except Exception as e:
-                    logger.warning(f"  ✗ Yahoo API {ticker_symbol}: {e}")
+                    logger.warning(f"  ✗ yfinance {ticker_symbol}: {e}")
                     stock_data = None
 
         # Fallback para demo se real falhou
