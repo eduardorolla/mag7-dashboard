@@ -2,16 +2,23 @@
 main.py — Servidor FastAPI do Dashboard Magnificent 7.
 
 Endpoints:
-  GET /api/dashboard      → Dados completos de todas as M7
+  GET /              → Serve o frontend (dashboard completo)
+  GET /api/dashboard → Dados completos de todas as M7
   GET /api/stock/{ticker} → Dados de uma ação específica
   GET /api/history/{ticker}?period=1y → Histórico de preços
-  GET /                   → Serve o frontend React
+  GET /api/tickers   → Lista de tickers
+  GET /api/cache/clear → Limpa cache
+  GET /health        → Health check (usado pelo Render)
 
-Para rodar:
+Para rodar localmente:
   pip install -r requirements.txt
   python main.py
+  Abra http://localhost:8000
 
-Depois abra http://localhost:8000 no browser.
+Para deploy no Render:
+  - Push para GitHub
+  - Conecte o repo ao Render
+  - Ele detecta o Dockerfile automaticamente
 """
 
 from fastapi import FastAPI, HTTPException
@@ -35,9 +42,9 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS — permite que o frontend React se comunique com a API
+# CORS — permite que o frontend se comunique com a API
 # Educacional: CORS (Cross-Origin Resource Sharing) é um mecanismo de segurança
-# dos browsers. Sem isso, o browser bloquearia requests de localhost:3000 para localhost:8000.
+# dos browsers. Em produção, o ideal seria restringir allow_origins ao seu domínio.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,9 +54,10 @@ app.add_middleware(
 )
 
 # Cache simples em memória para não bombardear o Yahoo Finance
-# Educacional: Em produção, usaríamos Redis ou similar. Aqui, um dict basta.
+# Educacional: Em produção com múltiplas instâncias, usaríamos Redis.
+# Com uma instância no Render free tier, um dict em memória funciona perfeitamente.
 _cache = {}
-CACHE_TTL = 300  # 5 minutos
+CACHE_TTL = int(os.environ.get("CACHE_TTL", 300))  # 5 min padrão, configurável via env var
 
 
 def get_cached(key: str):
@@ -149,6 +157,20 @@ async def clear_cache():
     return {"message": "Cache limpo com sucesso"}
 
 
+# ==================== HEALTH CHECK ====================
+# Educacional: O Render (e outros PaaS) pinga este endpoint para saber se
+# o serviço está vivo. Se retornar erro, o Render reinicia o container.
+
+@app.get("/health")
+async def health_check():
+    """Health check para o Render e monitoramento."""
+    return {
+        "status": "healthy",
+        "cache_entries": len(_cache),
+        "cache_ttl": CACHE_TTL,
+    }
+
+
 # ==================== FRONTEND ====================
 
 @app.get("/")
@@ -170,8 +192,11 @@ if os.path.exists(frontend_dir):
 
 
 if __name__ == "__main__":
+    # Educacional: O Render define a variável PORT automaticamente.
+    # Localmente, se PORT não existir, usa 8000.
+    port = int(os.environ.get("PORT", 8000))
     print("\n" + "=" * 60)
     print("  MAGNIFICENT 7 DASHBOARD")
-    print("  Abra http://localhost:8000 no seu browser")
+    print(f"  Abra http://localhost:{port} no seu browser")
     print("=" * 60 + "\n")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=port)
