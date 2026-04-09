@@ -79,7 +79,7 @@ def _get_yahoo_crumb() -> Optional[str]:
 
 def _yahoo_api_quote(ticker_symbol: str) -> Optional[Dict]:
     """Busca dados de uma ação via Yahoo Finance API v10/quoteSummary (fallback)."""
-    modules = "price,summaryDetail,defaultKeyStatistics,financialData,earnings"
+    modules = "price,summaryDetail,defaultKeyStatistics,financialData,earnings,cashflowStatementHistory,incomeStatementHistory"
     url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker_symbol}"
     crumb = _get_yahoo_crumb()
     params = {"modules": modules}
@@ -178,12 +178,19 @@ def _parse_yahoo_api_to_stock(ticker_symbol: str, api_data: Dict, sp500_prices: 
         detail = api_data.get("summaryDetail", {})
         stats = api_data.get("defaultKeyStatistics", {})
         fin = api_data.get("financialData", {})
+        cf_hist = api_data.get("cashflowStatementHistory", {})
+        inc_hist = api_data.get("incomeStatementHistory", {})
 
         def raw(d, key):
+            """Extrai valor de dict Yahoo API (pode ser {raw:x, fmt:'y'} ou valor direto)."""
             v = d.get(key, {})
             if isinstance(v, dict):
-                return v.get("raw")
-            return v
+                r = v.get("raw")
+                if r is not None:
+                    return r
+                # Pode ser um dict vazio {} que o Yahoo usa para "N/A"
+                return None
+            return v if v is not None else None
 
         result["current_price"] = raw(price, "regularMarketPrice")
         result["market_cap"] = raw(price, "marketCap")
@@ -191,7 +198,16 @@ def _parse_yahoo_api_to_stock(ticker_symbol: str, api_data: Dict, sp500_prices: 
         result["forward_pe"] = raw(stats, "forwardPE") or raw(detail, "forwardPE")
         result["trailing_pe"] = raw(detail, "trailingPE")
         result["price_to_sales"] = raw(detail, "priceToSalesTrailing12Months") or raw(stats, "priceToSalesTrailing12Months")
-        result["peg_ratio"] = raw(stats, "pegRatio")
+
+        # PEG: tenta múltiplos locais
+        result["peg_ratio"] = raw(stats, "pegRatio") or raw(fin, "pegRatio") or raw(detail, "pegRatio")
+        # Se PEG não veio, calcula a partir de P/E e earnings growth
+        if result["peg_ratio"] is None:
+            fpe = result["forward_pe"]
+            eg = raw(stats, "earningsQuarterlyGrowth") or raw(fin, "earningsGrowth")
+            if fpe and eg and eg > 0:
+                result["peg_ratio"] = round(fpe / (eg * 100), 2)
+
         result["fifty_two_week_high"] = raw(detail, "fiftyTwoWeekHigh")
         result["fifty_two_week_low"] = raw(detail, "fiftyTwoWeekLow")
 
@@ -215,19 +231,41 @@ def _parse_yahoo_api_to_stock(ticker_symbol: str, api_data: Dict, sp500_prices: 
         rg = raw(fin, "revenueGrowth")
         result["revenue_growth"] = round(rg * 100, 2) if rg else None
 
-        result["capex_to_revenue"] = None  # Não disponível nesta API
+        # CAPEX / Revenue — extraído dos demonstrativos financeiros
+        result["capex_to_revenue"] = None
+        try:
+            cf_stmts = cf_hist.get("cashflowStatements", [])
+            inc_stmts = inc_hist.get("incomeStatementHistory", [])
+            if cf_stmts and inc_stmts:
+                capex = abs(raw(cf_stmts[0], "capitalExpenditures") or 0)
+                revenue = raw(inc_stmts[0], "totalRevenue") or 0
+                if capex > 0 and revenue > 0:
+                    result["capex_to_revenue"] = round((capex / revenue) * 100, 2)
+        except Exception as e:
+            logger.debug(f"CAPEX parse error {ticker_symbol}: {e}")
+
         result["dividend_yield"] = raw(detail, "dividendYield")
         if result["dividend_yield"]:
             result["dividend_yield"] = round(result["dividend_yield"] * 100, 2)
 
-    # RSI e Beta via histórico
+        # Beta do Yahoo (estático, do summaryDetail)
+        result["_yahoo_beta"] = raw(detail, "beta") or raw(stats, "beta3Year")
+
+    # RSI e Beta via histórico de preços
     hist_df = _yahoo_api_history(ticker_symbol, "3mo")
     if hist_df is not None and not hist_df.empty:
         result["rsi_14"] = calculate_rsi(hist_df["Close"])
-        result["beta_90d"] = calculate_beta(hist_df["Close"], sp500_prices)
+        # Beta calculado vs S&P 500
+        calc_beta = calculate_beta(hist_df["Close"], sp500_prices)
+        result["beta_90d"] = calc_beta
     else:
         result["rsi_14"] = None
         result["beta_90d"] = None
+
+    # Se beta calculado falhou, usa o beta estático do Yahoo
+    if result.get("beta_90d") is None and result.get("_yahoo_beta") is not None:
+        result["beta_90d"] = round(float(result["_yahoo_beta"]), 2)
+    result.pop("_yahoo_beta", None)
 
     # Put/Call (não disponível via API direta, fica None)
     result["put_call_ratio"] = None
@@ -728,8 +766,16 @@ def fetch_single_stock(ticker_symbol: str, sp500_prices: pd.Series) -> Dict[str,
 
 
 def fetch_sp500_prices() -> pd.Series:
-    """Busca preços históricos do S&P 500 para cálculo de Beta."""
-    # Tenta yfinance primeiro
+    """Busca preços históricos do S&P 500 para cálculo de Beta.
+    Yahoo API direta primeiro (melhor em cloud), yfinance como fallback."""
+
+    # Tentativa 1: Yahoo API direta
+    df = _yahoo_api_history("^GSPC", "6mo")
+    if df is not None and not df.empty:
+        logger.info(f"S&P 500 obtido via Yahoo API direta ({len(df)} pontos)")
+        return df["Close"]
+
+    # Tentativa 2: yfinance
     if YFINANCE_AVAILABLE:
         try:
             sp500 = yf.Ticker("^GSPC")
@@ -739,19 +785,27 @@ def fetch_sp500_prices() -> pd.Series:
         except Exception as e:
             logger.warning(f"yfinance S&P 500 falhou: {e}")
 
-    # Fallback: Yahoo API direta
-    df = _yahoo_api_history("^GSPC", "6mo")
-    if df is not None and not df.empty:
-        logger.info("S&P 500 obtido via Yahoo API direta")
-        return df["Close"]
-
     logger.warning("Não conseguiu buscar S&P 500 por nenhum método")
     return pd.Series()
 
 
 def fetch_price_history(ticker_symbol: str, period: str = "1y") -> list:
-    """Busca histórico de preços para gráficos."""
-    # Tenta yfinance primeiro
+    """Busca histórico de preços para gráficos.
+    Usa Yahoo API direta primeiro (mais confiável em cloud), yfinance como fallback."""
+
+    # Tentativa 1: Yahoo API direta (funciona melhor em datacenters)
+    df = _yahoo_api_history(ticker_symbol, period)
+    if df is not None and not df.empty:
+        records = []
+        for date, row in df.iterrows():
+            records.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "close": round(float(row["Close"]), 2),
+                "volume": int(row["Volume"]) if pd.notna(row.get("Volume")) else 0,
+            })
+        return records
+
+    # Tentativa 2: yfinance
     if YFINANCE_AVAILABLE:
         try:
             ticker = yf.Ticker(ticker_symbol)
@@ -767,19 +821,6 @@ def fetch_price_history(ticker_symbol: str, period: str = "1y") -> list:
                 return records
         except Exception as e:
             logger.warning(f"yfinance histórico falhou para {ticker_symbol}: {e}")
-
-    # Fallback: Yahoo API direta
-    df = _yahoo_api_history(ticker_symbol, period)
-    if df is not None and not df.empty:
-        logger.info(f"Histórico de {ticker_symbol} obtido via Yahoo API direta")
-        records = []
-        for date, row in df.iterrows():
-            records.append({
-                "date": date.strftime("%Y-%m-%d"),
-                "close": round(float(row["Close"]), 2),
-                "volume": int(row["Volume"]) if pd.notna(row.get("Volume")) else 0,
-            })
-        return records
 
     # Último fallback: demo
     return _generate_demo_history(ticker_symbol, period)

@@ -601,26 +601,36 @@ async function loadHistory(period, btnEl) {
         document.querySelectorAll("#tab-performance .chart-controls:first-of-type .btn").forEach(b => b.classList.remove("btn-active"));
         btnEl.classList.add("btn-active");
     }
+    window._currentPeriod = period;
+
+    // Verifica se já temos todos os tickers em cache para este período
     const tickers = Object.keys(COLORS);
-    for(const t of tickers) {
-        const key = t + "_" + period;
-        if(historyCache[key]) continue;
+    const allCached = tickers.every(t => historyCache[t + "_" + period]);
 
-        // Primeiro tenta dados embutidos (modo standalone)
-        if(window.__HISTORY_DATA__ && window.__HISTORY_DATA__[key]) {
-            historyCache[key] = window.__HISTORY_DATA__[key];
-            continue;
-        }
-
-        // Depois tenta a API (modo servidor)
+    if(!allCached) {
+        // Usa endpoint batch (1 request em vez de 7)
         try {
-            const res = await fetch("/api/history/" + t + "?period=" + period);
-            if(res.ok) historyCache[key] = await res.json();
+            const res = await fetch("/api/history-batch?period=" + period);
+            if(res.ok) {
+                const batch = await res.json();
+                for(const [t, data] of Object.entries(batch)) {
+                    historyCache[t + "_" + period] = data;
+                }
+            }
         } catch(e) {
-            console.warn("Sem dados de historico para " + t, e);
+            console.warn("Batch history falhou, tentando individual...", e);
+            // Fallback: busca individual
+            for(const t of tickers) {
+                const key = t + "_" + period;
+                if(historyCache[key]) continue;
+                try {
+                    const res = await fetch("/api/history/" + t + "?period=" + period);
+                    if(res.ok) historyCache[key] = await res.json();
+                } catch(e2) { console.warn("Sem dados para " + t, e2); }
+            }
         }
     }
-    window._currentPeriod = period;
+
     renderPerfChart();
     // Set initial toggle opacity
     document.querySelectorAll(".ticker-toggle").forEach(el => {

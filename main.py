@@ -144,6 +144,34 @@ async def get_history(ticker: str, period: str = "1y"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/history-batch")
+async def get_history_batch(period: str = "6mo"):
+    """
+    Retorna histórico de preços de TODOS os M7 de uma vez.
+    Evita que o frontend faça 7 requests separados (rate limiting).
+    """
+    valid_periods = ["1mo", "3mo", "6mo", "1y", "2y", "5y"]
+    if period not in valid_periods:
+        raise HTTPException(status_code=400, detail=f"Período inválido. Use: {valid_periods}")
+
+    cache_key = f"history_batch_{period}"
+    cached = get_cached(cache_key)
+    if cached:
+        return cached
+
+    result = {}
+    for ticker in MAG7_TICKERS:
+        try:
+            data = fetch_price_history(ticker, period)
+            result[ticker] = data
+        except Exception as e:
+            logger.warning(f"Erro histórico batch {ticker}: {e}")
+            result[ticker] = []
+
+    set_cached(cache_key, result)
+    return result
+
+
 @app.get("/api/tickers")
 async def get_tickers():
     """Retorna a lista de tickers das Magnificent 7."""
