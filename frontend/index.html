@@ -314,7 +314,7 @@ function render() {
         <div class="chart-section">
             <div class="chart-header">
                 <div class="chart-title">Performance Comparativa (%)</div>
-                <div class="chart-controls">
+                <div class="chart-controls" id="period-controls">
                     ${['1mo','3mo','6mo','1y'].map(p => `<button class="btn btn-sm ${p==='6mo'?'btn-active':''}" onclick="loadHistory('${p}',this)">${p}</button>`).join('')}
                 </div>
             </div>
@@ -597,9 +597,15 @@ function toggleTicker(ticker, el) {
 }
 
 async function loadHistory(period, btnEl) {
+    // Toggle active button
+    document.querySelectorAll("#period-controls .btn").forEach(b => b.classList.remove("btn-active"));
     if(btnEl) {
-        document.querySelectorAll("#tab-performance .chart-controls:first-of-type .btn").forEach(b => b.classList.remove("btn-active"));
         btnEl.classList.add("btn-active");
+    } else {
+        // Initial load — mark the matching button
+        document.querySelectorAll("#period-controls .btn").forEach(b => {
+            if(b.textContent === period) b.classList.add("btn-active");
+        });
     }
     window._currentPeriod = period;
 
@@ -608,6 +614,22 @@ async function loadHistory(period, btnEl) {
     const allCached = tickers.every(t => historyCache[t + "_" + period]);
 
     if(!allCached) {
+        // Show loading state on chart
+        const canvas = document.getElementById("chart-perf");
+        if(canvas) {
+            const wrap = canvas.parentElement;
+            let loader = wrap.querySelector(".perf-loader");
+            if(!loader) {
+                loader = document.createElement("div");
+                loader.className = "perf-loader";
+                loader.style.cssText = "position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text-muted);font-size:14px;z-index:5";
+                wrap.style.position = "relative";
+                wrap.appendChild(loader);
+            }
+            loader.textContent = "Carregando " + period + "...";
+            loader.style.display = "block";
+        }
+
         // Usa endpoint batch (1 request em vez de 7)
         try {
             const res = await fetch("/api/history-batch?period=" + period);
@@ -624,11 +646,15 @@ async function loadHistory(period, btnEl) {
                 const key = t + "_" + period;
                 if(historyCache[key]) continue;
                 try {
-                    const res = await fetch("/api/history/" + t + "?period=" + period);
-                    if(res.ok) historyCache[key] = await res.json();
+                    const res2 = await fetch("/api/history/" + t + "?period=" + period);
+                    if(res2.ok) historyCache[key] = await res2.json();
                 } catch(e2) { console.warn("Sem dados para " + t, e2); }
             }
         }
+
+        // Hide loader
+        const loader = document.querySelector(".perf-loader");
+        if(loader) loader.style.display = "none";
     }
 
     renderPerfChart();
