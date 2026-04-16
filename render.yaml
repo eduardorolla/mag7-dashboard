@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: mag7-dashboard
+    runtime: docker
+    plan: free
+    region: ohio
+    healthCheckPath: /health
+    envVars:
+      - key: FMP_API_KEY
+        sync: false
+      - key: CACHE_TTL
+        value: "300"
